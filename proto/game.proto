@@ -1,0 +1,90 @@
+syntax = "proto3";
+
+package game;
+
+option go_package = "kr1sal.com/build-n-destroy/internal/pb;pb";
+
+message Vector3 {
+  float x = 1;
+  float y = 2;
+  float z = 3;
+}
+
+message Orientation {
+  float pitch = 1;
+  float yaw = 2;
+}
+
+message ChatMessage {
+    optional string player_id = 1; // nil = server message
+    string message = 2;
+}
+
+message Join {
+}
+
+message JoinAck {
+    string player_id = 1;
+}
+
+// message Leave {
+// }
+
+// message LeaveAck {
+// }
+
+message PlayerInput {
+    optional Vector3 movement_direction = 1;
+    optional Orientation camera_orientation = 2;
+
+    // bool jump = 3;
+    // bool crouch = 4;
+    // bool sprint = 5;
+    // bool fire = 6;
+    // bool reload = 7;
+}
+
+message PlayerState {
+    string player_id = 1;
+
+    Vector3 position = 2;
+    Orientation camera_orientation = 3;
+
+    // bool is_jumping = 4;
+    // bool is_crouching = 5;
+    // bool is_sprinting = 6;
+    // bool is_firing = 7;
+    // bool is_reloading = 8;
+
+    // int32 health = 9;
+    // float stamina = 10;
+    // int32 ammo = 11;
+}
+
+message GameState {
+    uint32 tick = 1;
+    repeated PlayerState players = 2;
+}
+
+
+message ClientEvent {
+    oneof event {
+        Join join = 1;
+        // Leave leave = 2;
+        PlayerInput player_input = 3;
+        ChatMessage chat_message = 4;
+    }
+}
+
+message ServerEvent {
+    oneof event {
+        JoinAck join_ack = 1;
+        // LeaveAck leave_ack = 2;
+        GameState game_state = 3;
+        ChatMessage chat_message = 4;
+    }
+}
+
+service GameService {
+    rpc Play(stream ClientEvent) returns (stream ServerEvent);
+}
