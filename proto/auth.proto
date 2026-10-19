@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package auth;
+
+option csharp_namespace = "Auth";
+
+message LoginRequest {
+  string login    = 1;
+  string password = 2;
+}
+
+message RegisterRequest {
+  string login    = 1;
+  string password = 2;
+}
+
+message RefreshRequest {
+  string refresh_token = 1;
+}
+
+message LogoutRequest {
+  string refresh_token = 1;
+}
+
+message LogoutResponse {}
+
+message MeRequest {}
+
+message MeResponse {
+  string user_id = 1;
+  string login   = 2;
+  string role    = 3;
+}
+
+message TokenPair {
+  string access_token       = 1;
+  string refresh_token      = 2;
+  int64  access_expires_at  = 3;
+  int64  refresh_expires_at = 4;
+}
+
+service AuthService {
+  rpc Register(RegisterRequest) returns (TokenPair);
+  rpc Login(LoginRequest)       returns (TokenPair);
+  rpc Refresh(RefreshRequest)   returns (TokenPair);
+  rpc Logout(LogoutRequest)     returns (LogoutResponse);
+  rpc Me(MeRequest)             returns (MeResponse);
+}

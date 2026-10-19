@@ -18,7 +18,7 @@ namespace BuildNDestroy.Network;
 
 public partial class NetworkClient : Node
 {
-	[Export] public string ServerAddress { get; set; } = "http://127.0.0.1:50051";
+	[Export] public string ServerAddress { get; set; } = "http://192.168.137.129:50051";
 
 	private GrpcChannel? _channel;
 	private AsyncDuplexStreamingCall<PbClientEvent, PbServerEvent>? _call;
@@ -30,6 +30,14 @@ public partial class NetworkClient : Node
 
 	public string? LocalPlayerId { get; private set; }
 	public bool IsJoined => LocalPlayerId != null;
+	public bool IsConnected => _call != null;
+
+	[Signal] public delegate void DisconnectedEventHandler(string reason);
+
+	static NetworkClient()
+	{
+		AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport", true);
+	}
 
 	public override void _Ready()
 	{
@@ -66,19 +74,74 @@ public partial class NetworkClient : Node
 				DisposeHttpClient = true,
 			});
 
-			var client = new PbGameService.GameServiceClient(_channel);
-			_call = client.Play(cancellationToken: ct);
+			// Одна попытка переподключения: если первый stream упал с Unauthenticated,
+			// пробуем освежить access-токен через refresh и переоткрыть.
+			var reconnectAllowed = true;
+			while (!ct.IsCancellationRequested)
+			{
+				var ok = await OpenStreamAsync(ct);
+				if (ok) break;
+				if (!reconnectAllowed) break;
+				reconnectAllowed = false;
 
-			await _call.RequestStream.WriteAsync(new PbClientEvent { Join = new PbJoin() });
-
-			var send = Task.Run(() => SendLoop(ct), ct);
-			var recv = Task.Run(() => RecvLoop(ct), ct);
-			await Task.WhenAny(send, recv);
+				try
+				{
+					using var auth = new AuthClient(ServerAddress);
+					await auth.RefreshAsync(ct);
+					GD.Print("[Net] token refreshed, reconnecting");
+				}
+				catch (Exception e)
+				{
+					GD.PrintErr($"[Net] refresh failed: {e.Message}");
+					AuthSession.Clear();
+					EmitSignal(SignalName.Disconnected, "unauthenticated");
+					return;
+				}
+			}
 		}
 		catch (OperationCanceledException) { }
 		catch (Exception e)
 		{
 			GD.PrintErr($"[Net] fatal: {e}");
+		}
+	}
+
+	// Возвращает true, если стрим корректно завершился (не из-за Unauthenticated).
+	// false → надо попробовать refresh + reconnect.
+	private async Task<bool> OpenStreamAsync(CancellationToken ct)
+	{
+		if (_channel == null) return true;
+		if (string.IsNullOrEmpty(AuthSession.AccessToken))
+		{
+			GD.PrintErr("[Net] no access token");
+			return true;
+		}
+
+		var client = new PbGameService.GameServiceClient(_channel);
+		var md = new Metadata { { "authorization", $"Bearer {AuthSession.AccessToken}" } };
+
+		try { _call?.Dispose(); } catch { }
+		_call = client.Play(headers: md, cancellationToken: ct);
+
+		try
+		{
+			await _call.RequestStream.WriteAsync(new PbClientEvent { Join = new PbJoin() });
+
+			var send = Task.Run(() => SendLoop(ct), ct);
+			var recv = Task.Run(() => RecvLoop(ct), ct);
+			await Task.WhenAny(send, recv);
+			return true;
+		}
+		catch (RpcException ex) when (ex.StatusCode == StatusCode.Unauthenticated)
+		{
+			GD.Print("[Net] stream unauthenticated, will try refresh");
+			return false;
+		}
+		catch (OperationCanceledException) { return true; }
+		catch (Exception e)
+		{
+			GD.PrintErr($"[Net] stream: {e.Message}");
+			return true;
 		}
 	}
 
@@ -94,6 +157,7 @@ public partial class NetworkClient : Node
 			if (_call != null) await _call.RequestStream.CompleteAsync();
 		}
 		catch (OperationCanceledException) { }
+		catch (RpcException ex) when (ex.StatusCode == StatusCode.Unauthenticated) { throw; }
 		catch (Exception e) { GD.PrintErr($"[Net] send: {e.Message}"); }
 	}
 
@@ -108,6 +172,7 @@ public partial class NetworkClient : Node
 			}
 		}
 		catch (OperationCanceledException) { }
+		catch (RpcException ex) when (ex.StatusCode == StatusCode.Unauthenticated) { throw; }
 		catch (Exception e) { GD.PrintErr($"[Net] recv: {e.Message}"); }
 	}
 
