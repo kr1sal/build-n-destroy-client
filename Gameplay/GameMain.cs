@@ -29,6 +29,7 @@ public partial class GameMain : Node3D
 	private float _pitch;
 	private bool _thirdPerson;
 
+	private bool _wantsMouseCaptured = true;
 	private bool _hasLocalState;
 	private Vector3 _serverPos;
 	private Vector3 _prevServerPos;
@@ -58,6 +59,15 @@ public partial class GameMain : Node3D
 		Input.MouseMode = Input.MouseModeEnum.Captured;
 	}
 
+	public override void _Notification(int what)
+	{
+		if (what == NotificationApplicationFocusIn || what == NotificationWMWindowFocusIn)
+		{
+			if (_wantsMouseCaptured)
+				Input.MouseMode = Input.MouseModeEnum.Captured;
+		}
+	}
+
 	public override void _UnhandledInput(InputEvent @event)
 	{
 		if (@event is InputEventMouseMotion motion && Input.MouseMode == Input.MouseModeEnum.Captured)
@@ -70,9 +80,15 @@ public partial class GameMain : Node3D
 		if (@event is InputEventKey key && key.Pressed && !key.Echo)
 		{
 			if (key.Keycode == Key.Escape)
+			{
+				_wantsMouseCaptured = false;
 				Input.MouseMode = Input.MouseModeEnum.Visible;
+			}
 			else if (key.Keycode == Key.F1)
+			{
+				_wantsMouseCaptured = true;
 				Input.MouseMode = Input.MouseModeEnum.Captured;
+			}
 			else if (key.Keycode == Key.V)
 				_thirdPerson = !_thirdPerson;
 			else if (key.Keycode == Key.F3)
