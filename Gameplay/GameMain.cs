@@ -10,6 +10,8 @@ namespace BuildNDestroy.Gameplay;
 public partial class GameMain : Node3D
 {
 	[Export] public float MouseSensitivity { get; set; } = 0.002f;
+	[Export] public float ThirdPersonDistance { get; set; } = 4.0f;
+	[Export] public float ThirdPersonHeight { get; set; } = 0.75f;
 
 	private NetworkClient _net = null!;
 	private Camera3D _camera = null!;
@@ -18,6 +20,7 @@ public partial class GameMain : Node3D
 	private readonly Dictionary<string, MeshInstance3D> _players = new();
 	private float _yaw;
 	private float _pitch;
+	private bool _thirdPerson;
 
 	public override void _Ready()
 	{
@@ -42,6 +45,8 @@ public partial class GameMain : Node3D
 				Input.MouseMode = Input.MouseModeEnum.Visible;
 			else if (key.Keycode == Key.F1)
 				Input.MouseMode = Input.MouseModeEnum.Captured;
+			else if (key.Keycode == Key.V)
+				_thirdPerson = !_thirdPerson;
 		}
 	}
 
@@ -94,15 +99,27 @@ public partial class GameMain : Node3D
 			node.Position = pos;
 
 			var isLocal = p.PlayerId == _net.LocalPlayerId;
-			node.Visible = !isLocal;
 
 			if (isLocal)
 			{
-				_camera.Position = pos + new Vector3(0f, 0.75f, 0f);
+				node.Visible = _thirdPerson;
+				node.Rotation = new Vector3(0f, _yaw, 0f);
+
+				var head = pos + new Vector3(0f, ThirdPersonHeight, 0f);
+				if (_thirdPerson)
+				{
+					var basis = Basis.FromEuler(new Vector3(_pitch, _yaw, 0f));
+					_camera.Position = head + basis * new Vector3(0f, 0f, ThirdPersonDistance);
+				}
+				else
+				{
+					_camera.Position = head;
+				}
 				_camera.Rotation = new Vector3(_pitch, _yaw, 0f);
 			}
 			else
 			{
+				node.Visible = true;
 				node.Rotation = new Vector3(0f, p.CameraOrientation?.Yaw ?? 0f, 0f);
 			}
 		}
