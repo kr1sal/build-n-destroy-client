@@ -13,20 +13,48 @@ public partial class GameMain : Node3D
 	[Export] public float ThirdPersonDistance { get; set; } = 4.0f;
 	[Export] public float ThirdPersonHeight { get; set; } = 0.75f;
 
+	[Export] public bool DebugCollisions { get; set; } = false;
+	[Export] public float PredictedMoveSpeed { get; set; } = 5.0f;
+
+	private const float CapsuleHeight = 1.8f;
+	private const float CapsuleRadius = 0.4f;
+
 	private NetworkClient _net = null!;
 	private Camera3D _camera = null!;
 	private Node3D _playersRoot = null!;
+	private Node3D _debugRoot = null!;
 
 	private readonly Dictionary<string, MeshInstance3D> _players = new();
 	private float _yaw;
 	private float _pitch;
 	private bool _thirdPerson;
 
+	private bool _hasLocalState;
+	private Vector3 _serverPos;
+	private Vector3 _prevServerPos;
+	private Vector3 _predictedPos;
+	private Vector3 _prevPredictedPos;
+
+	private MeshInstance3D _dbgServerCur = null!;
+	private MeshInstance3D _dbgServerPrev = null!;
+	private MeshInstance3D _dbgClientCur = null!;
+	private MeshInstance3D _dbgClientPrev = null!;
+
 	public override void _Ready()
 	{
 		_net = GetNode<NetworkClient>("NetworkClient");
 		_camera = GetNode<Camera3D>("Camera3D");
 		_playersRoot = GetNode<Node3D>("Players");
+
+		_debugRoot = new Node3D { Name = "DebugCollisions", Visible = DebugCollisions };
+		AddChild(_debugRoot);
+
+		// Server — red hues; Client — cyan/blue hues. Previous = dimmer + more transparent.
+		_dbgServerCur = MakeDebugCapsule("DbgServerCur", new Color(1.0f, 0.25f, 0.25f, 0.55f));
+		_dbgServerPrev = MakeDebugCapsule("DbgServerPrev", new Color(0.55f, 0.10f, 0.10f, 0.30f));
+		_dbgClientCur = MakeDebugCapsule("DbgClientCur", new Color(0.25f, 0.75f, 1.00f, 0.55f));
+		_dbgClientPrev = MakeDebugCapsule("DbgClientPrev", new Color(0.10f, 0.35f, 0.60f, 0.30f));
+
 		Input.MouseMode = Input.MouseModeEnum.Captured;
 	}
 
@@ -47,6 +75,11 @@ public partial class GameMain : Node3D
 				Input.MouseMode = Input.MouseModeEnum.Captured;
 			else if (key.Keycode == Key.V)
 				_thirdPerson = !_thirdPerson;
+			else if (key.Keycode == Key.F3)
+			{
+				DebugCollisions = !DebugCollisions;
+				_debugRoot.Visible = DebugCollisions;
+			}
 		}
 	}
 
@@ -68,6 +101,13 @@ public partial class GameMain : Node3D
 		var worldMove = yawBasis * local;
 
 		_net.SendInput(worldMove, _yaw, _pitch);
+
+		if (_hasLocalState)
+		{
+			_prevPredictedPos = _predictedPos;
+			_predictedPos += worldMove * PredictedMoveSpeed * (float)delta;
+			UpdateDebugVisuals();
+		}
 	}
 
 	private void HandleEvent(PbServerEvent ev)
@@ -116,6 +156,15 @@ public partial class GameMain : Node3D
 					_camera.Position = head;
 				}
 				_camera.Rotation = new Vector3(_pitch, _yaw, 0f);
+
+				_prevServerPos = _hasLocalState ? _serverPos : pos;
+				_serverPos = pos;
+				if (!_hasLocalState)
+				{
+					_predictedPos = pos;
+					_prevPredictedPos = pos;
+					_hasLocalState = true;
+				}
 			}
 			else
 			{
@@ -136,10 +185,47 @@ public partial class GameMain : Node3D
 		var mesh = new MeshInstance3D
 		{
 			Name = $"Player_{id}",
-			Mesh = new CapsuleMesh { Height = 1.8f, Radius = 0.4f },
+			Mesh = new CapsuleMesh { Height = CapsuleHeight, Radius = CapsuleRadius },
 		};
 		_playersRoot.AddChild(mesh);
 		_players[id] = mesh;
 		return mesh;
+	}
+
+	private MeshInstance3D MakeDebugCapsule(string name, Color color)
+	{
+		var mat = new StandardMaterial3D
+		{
+			AlbedoColor = color,
+			Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+			ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+			CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+			NoDepthTest = true,
+		};
+		var mesh = new MeshInstance3D
+		{
+			Name = name,
+			Mesh = new CapsuleMesh { Height = CapsuleHeight, Radius = CapsuleRadius },
+			MaterialOverride = mat,
+			CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+			Visible = false,
+		};
+		_debugRoot.AddChild(mesh);
+		return mesh;
+	}
+
+	private void UpdateDebugVisuals()
+	{
+		if (!DebugCollisions) return;
+
+		_dbgServerCur.Visible = true;
+		_dbgServerPrev.Visible = true;
+		_dbgClientCur.Visible = true;
+		_dbgClientPrev.Visible = true;
+
+		_dbgServerCur.Position = _serverPos;
+		_dbgServerPrev.Position = _prevServerPos;
+		_dbgClientCur.Position = _predictedPos;
+		_dbgClientPrev.Position = _prevPredictedPos;
 	}
 }
